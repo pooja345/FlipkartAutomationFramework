@@ -6,6 +6,8 @@ import org.openqa.selenium.*;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import java.time.Duration;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 public class FurniturePage {
     WebDriver driver;
@@ -63,40 +65,59 @@ public class FurniturePage {
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
         JavascriptExecutor js = (JavascriptExecutor) driver;
 
-        // Verify Price label
-        try {
-            WebElement priceLabel = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.xpath("//span[normalize-space()='Price']")));
-            System.out.println("Verified Price label is present: " + priceLabel.isDisplayed());
-        } catch (TimeoutException e) {
-            System.out.println("Price label not found — skipping price filter.");
-            return;
-        }
+        // Scroll into view before clicking
+        Consumer<WebElement> scrollAndClick = (WebElement element) -> {
+            js.executeScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", element);
+            element.click();
+        };
 
-        // Select min price if dropdown exists
-        try {
-            WebElement minDropdown = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.xpath("//div[@class='suthUA']//select[@fdprocessedid='d8w5dk']")));
-            minDropdown.click();
-            WebElement minOption = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//div[@class='suthUA']//select[@fdprocessedid='d8w5dk']/option[@value='" + maxPrice + "']")));
-            minOption.click();
-            wait.until(webDriver -> js.executeScript("return document.readyState").equals("complete"));
-        } catch (TimeoutException e) {
-            System.out.println("Min price dropdown not found — skipping min price selection.");
-        }
+        // Helper method to safely click dropdown and select option
+        BiConsumer<By, By> safeClickDropdown = (dropdownLocator, optionLocator) -> {
+            int attempts = 0;
+            boolean clicked = false;
 
-        // Select max price if dropdown exists
-        try {
-            WebElement maxDropdown = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.xpath("//div[@class='tKgS7w']//select[@fdprocessedid='10spxh']")));
-            maxDropdown.click();
-            WebElement maxOption = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//div[@class='tKgS7w']//select[@fdprocessedid='10spxh']/option[@value='" + maxPrice + "']")));
-            maxOption.click();
-            wait.until(webDriver -> js.executeScript("return document.readyState").equals("complete"));
-        } catch (TimeoutException e) {
-            System.out.println("Max price dropdown not found — skipping max price selection.");
-        }
+            while (attempts < 3 && !clicked) {
+                try {
+                    WebElement dropdown = wait.until(ExpectedConditions.elementToBeClickable(dropdownLocator));
+                    scrollAndClick.accept(dropdown);
+
+                    WebElement option = wait.until(ExpectedConditions.elementToBeClickable(optionLocator));
+                    scrollAndClick.accept(option);
+
+                    wait.until(webDriver -> js.executeScript("return document.readyState").equals("complete"));
+                    clicked = true;
+                } catch (ElementClickInterceptedException e) {
+                    System.out.println("Click intercepted, retrying... attempt " + (attempts + 1));
+                    try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+                } catch (TimeoutException e) {
+                    throw new RuntimeException("Dropdown or option not found: " + dropdownLocator, e);
+                }
+                attempts++;
+            }
+
+            if (!clicked) {
+                throw new RuntimeException("Failed to click dropdown after 3 attempts: " + dropdownLocator);
+            }
+        };
+
+        // Verify Price label is visible
+        WebElement priceLabel = wait.until(ExpectedConditions.visibilityOfElementLocated(
+                By.xpath("//span[normalize-space()='Price']")));
+        System.out.println("Verified Price label is present: " + priceLabel.isDisplayed());
+
+        // Select min price
+        safeClickDropdown.accept(
+                By.xpath("//div[@class='suthUA']//select"),
+                By.xpath("//div[@class='suthUA']//select/option[@value='500']")
+        );
+
+        // Select max price
+        safeClickDropdown.accept(
+                By.xpath("//div[@class='tKgS7w']//select"),
+                By.xpath("//div[@class='tKgS7w']//select/option[@value='" + maxPrice + "']")
+        );
+
+        System.out.println("✅ Price filter applied successfully — Max price: " + maxPrice);
     }
+
 }
